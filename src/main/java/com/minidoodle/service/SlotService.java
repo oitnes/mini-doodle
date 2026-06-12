@@ -36,9 +36,7 @@ public class SlotService {
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
         Instant endAt = resolveEndAt(request);
-        if (!request.startAt().isBefore(endAt)) {
-            throw new IllegalArgumentException("end must be after start");
-        }
+        validateRange(request.startAt(), endAt);
 
         TimeSlot slot = new TimeSlot();
         slot.setCalendar(calendar);
@@ -67,11 +65,11 @@ public class SlotService {
         if (request.endAt() != null) slot.setEndAt(request.endAt());
         if (request.status() != null) slot.setStatus(request.status());
 
-        if (!slot.getStartAt().isBefore(slot.getEndAt())) {
-            throw new IllegalArgumentException("end must be after start");
-        }
+        validateRange(slot.getStartAt(), slot.getEndAt());
 
-        return SlotResponse.from(timeSlotRepository.save(slot));
+        // slot is managed: dirty checking flushes the change and fires the
+        // @Version check at commit — no explicit save() needed.
+        return SlotResponse.from(slot);
     }
 
     @Transactional
@@ -102,6 +100,9 @@ public class SlotService {
     }
 
     private Instant resolveEndAt(CreateSlotRequest request) {
+        if (request.endAt() != null && request.durationMinutes() != null) {
+            throw new IllegalArgumentException("Provide either endAt or durationMinutes, not both");
+        }
         if (request.endAt() != null) {
             return request.endAt();
         }
@@ -109,5 +110,13 @@ public class SlotService {
             return request.startAt().plus(request.durationMinutes(), ChronoUnit.MINUTES);
         }
         throw new IllegalArgumentException("Either endAt or durationMinutes must be provided");
+    }
+
+    // Single home for the time-range invariant so create and update cannot
+    // drift apart in rule or message.
+    private static void validateRange(Instant startAt, Instant endAt) {
+        if (!startAt.isBefore(endAt)) {
+            throw new IllegalArgumentException("end must be after start");
+        }
     }
 }

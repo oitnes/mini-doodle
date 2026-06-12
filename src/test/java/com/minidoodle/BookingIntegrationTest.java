@@ -33,6 +33,7 @@ class BookingIntegrationTest extends BaseIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody().title()).isEqualTo("Standup");
+        assertThat(response.getBody().createdAt()).isNotNull();
     }
 
     @Test
@@ -67,7 +68,7 @@ class BookingIntegrationTest extends BaseIntegrationTest {
         ).getBody();
 
         ResponseEntity<MeetingResponse> fetched = rest.getForEntity(
-                "/api/v1/meetings/" + created.id(), MeetingResponse.class);
+                "/api/v1/users/" + user.id() + "/meetings/" + created.id(), MeetingResponse.class);
 
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(fetched.getBody().title()).isEqualTo("1:1");
@@ -77,9 +78,66 @@ class BookingIntegrationTest extends BaseIntegrationTest {
 
     @Test
     void getMissingMeeting_returns404() {
+        UserResponse user = createUser();
         ResponseEntity<String> response = rest.getForEntity(
-                "/api/v1/meetings/" + java.util.UUID.randomUUID(), String.class);
+                "/api/v1/users/" + user.id() + "/meetings/" + java.util.UUID.randomUUID(), String.class);
         assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    void foreignUserCannotAccessMeeting() {
+        UserResponse owner = createUser();
+        UserResponse stranger = createUser();
+        SlotResponse slot = createSlot(owner, 9);
+
+        MeetingResponse meeting = rest.postForEntity(
+                "/api/v1/users/" + owner.id() + "/slots/" + slot.id() + "/meeting",
+                new BookMeetingRequest("Private", null, List.of()),
+                MeetingResponse.class
+        ).getBody();
+
+        // Stranger cannot read it
+        ResponseEntity<String> get = rest.getForEntity(
+                "/api/v1/users/" + stranger.id() + "/meetings/" + meeting.id(), String.class);
+        assertThat(get.getStatusCode().value()).isEqualTo(404);
+
+        // Stranger's cancel is a no-op: owner still sees the meeting
+        rest.delete("/api/v1/users/" + stranger.id() + "/meetings/" + meeting.id());
+        ResponseEntity<MeetingResponse> ownerGet = rest.getForEntity(
+                "/api/v1/users/" + owner.id() + "/meetings/" + meeting.id(), MeetingResponse.class);
+        assertThat(ownerGet.getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    void nullParticipantElement_returns400() {
+        UserResponse user = createUser();
+        SlotResponse slot = createSlot(user, 10);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/v1/users/" + user.id() + "/slots/" + slot.id() + "/meeting",
+                new org.springframework.http.HttpEntity<>("{\"title\":\"x\",\"participants\":[null]}", headers),
+                String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void tooManyParticipants_returns400() {
+        UserResponse user = createUser();
+        SlotResponse slot = createSlot(user, 11);
+
+        List<com.minidoodle.dto.ParticipantRequest> participants = new java.util.ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            participants.add(new com.minidoodle.dto.ParticipantRequest("p" + i + "@test.com"));
+        }
+
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/v1/users/" + user.id() + "/slots/" + slot.id() + "/meeting",
+                new BookMeetingRequest("Crowd", null, participants),
+                String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
     }
 
     @Test
@@ -93,7 +151,7 @@ class BookingIntegrationTest extends BaseIntegrationTest {
                 MeetingResponse.class
         ).getBody();
 
-        rest.delete("/api/v1/meetings/" + meeting.id());
+        rest.delete("/api/v1/users/" + user.id() + "/meetings/" + meeting.id());
 
         // Slot should be bookable again
         ResponseEntity<MeetingResponse> rebook = rest.postForEntity(
@@ -115,9 +173,9 @@ class BookingIntegrationTest extends BaseIntegrationTest {
                 MeetingResponse.class
         ).getBody();
 
-        rest.delete("/api/v1/meetings/" + meeting.id());
+        rest.delete("/api/v1/users/" + user.id() + "/meetings/" + meeting.id());
         // Second cancel should not error
-        rest.delete("/api/v1/meetings/" + meeting.id());
+        rest.delete("/api/v1/users/" + user.id() + "/meetings/" + meeting.id());
     }
 
     @Test

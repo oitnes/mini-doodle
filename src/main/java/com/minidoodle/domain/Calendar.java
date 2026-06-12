@@ -4,11 +4,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -36,10 +33,10 @@ public class Calendar {
     @Column(nullable = false)
     private String timezone;
 
-    @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    private Instant createdAt = Instant.now();
 
-    @OneToMany(mappedBy = "calendar", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<TimeSlot> slots = new ArrayList<>();
+    // No slots collection: nothing reads it, slots are always queried through
+    // TimeSlotRepository, and a cascade/orphanRemoval mapping on an unused
+    // collection is a latent mass-delete hazard.
 }

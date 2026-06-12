@@ -43,8 +43,11 @@ public class MeetingService {
         // (e.g. a public booking page), switch this read to a pessimistic
         // lock. The UNIQUE constraint on meeting.slot_id is the DB-level
         // backstop should both defences ever be bypassed.
+        //
+        // slot is managed: dirty checking flushes this change at commit, where
+        // the @Version check fires — the loser of a concurrent booking gets
+        // OptimisticLockingFailureException (-> 409).
         slot.setStatus(SlotStatus.BUSY);
-        timeSlotRepository.save(slot);  // version bump — concurrent loser throws OptimisticLockingFailureException
 
         Meeting meeting = new Meeting();
         meeting.setSlot(slot);
@@ -60,29 +63,33 @@ public class MeetingService {
     }
 
     @Transactional(readOnly = true)
-    public MeetingResponse getMeeting(UUID meetingId) {
-        return meetingRepository.findById(meetingId)
+    public MeetingResponse getMeeting(UUID userId, UUID meetingId) {
+        return meetingRepository.findByIdAndSlot_Calendar_User_Id(meetingId, userId)
                 .map(MeetingResponse::from)
                 .orElseThrow(() -> new MeetingNotFoundException(meetingId));
     }
 
-    // ARCHITECTURE DECISION: cancellation is idempotent (DELETE of a missing
-    // meeting is a 204, not a 404) and is not scoped to a user. The prototype
-    // has no authentication, so ownership checks on this endpoint would only
-    // pretend to be security; once authN exists, the caller's identity — not a
-    // path parameter — must authorize the cancel.
+    // ARCHITECTURE DECISION: meeting access is scoped to the slot owner via
+    // the path userId, exactly like the slot endpoints — without it, anyone
+    // holding a meeting UUID could read participant emails or cancel another
+    // user's meeting. There is still no authentication (the path userId is
+    // trusted), but scoping keeps the authorization model uniform so adding
+    // authN later means validating one identity, not auditing two patterns.
+    // Cancellation stays idempotent: deleting a missing/foreign meeting is a
+    // 204 no-op, not a 404.
     @Transactional
-    public void cancelMeeting(UUID meetingId) {
-        meetingRepository.findById(meetingId).ifPresent(meeting -> {
+    public void cancelMeeting(UUID userId, UUID meetingId) {
+        meetingRepository.findByIdAndSlot_Calendar_User_Id(meetingId, userId).ifPresent(meeting -> {
             UUID slotId = meeting.getSlot().getId();
             // Delete the meeting first (participants cascade at DB level).
             // Then use a bulk JPQL update to free the slot — avoids Hibernate
             // attempting to flush the dirty slot while the meeting entity is
-            // still in the persistence context.
+            // still in the persistence context. The bulk update bumps
+            // @Version itself (see TimeSlotRepository) so concurrent stale
+            // writers cannot overwrite the freed status.
             meetingRepository.delete(meeting);
             timeSlotRepository.updateStatusById(slotId, SlotStatus.FREE);
         });
-        // idempotent: no error if already cancelled/missing
     }
 
     private Participant buildParticipant(Meeting meeting, ParticipantRequest request) {

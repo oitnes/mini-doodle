@@ -20,8 +20,12 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 
     Page<TimeSlot> findByCalendar_User_Id(UUID userId, Pageable pageable);
 
+    // Bulk updates bypass Hibernate's automatic @Version handling, so the
+    // version is bumped explicitly: a concurrent transaction holding a stale
+    // snapshot of this row must fail its optimistic-lock check instead of
+    // silently overwriting the status written here.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("UPDATE TimeSlot s SET s.status = :status WHERE s.id = :id")
+    @Query("UPDATE TimeSlot s SET s.status = :status, s.version = s.version + 1 WHERE s.id = :id")
     void updateStatusById(@Param("id") UUID id, @Param("status") SlotStatus status);
 
     @Query("""

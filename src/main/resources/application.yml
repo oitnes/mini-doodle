@@ -6,6 +6,13 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/minidoodle}
     username: ${SPRING_DATASOURCE_USERNAME:minidoodle}
     password: ${SPRING_DATASOURCE_PASSWORD:minidoodle}
+    hikari:
+      # Request handling is DB-bound, so the Tomcat thread cap (below) is kept
+      # close to the pool size: excess threads would only queue on the pool.
+      # 5s connection-timeout fails fast under saturation instead of letting
+      # callers hang for Hikari's 30s default.
+      maximum-pool-size: 20
+      connection-timeout: 5000
 
   jpa:
     hibernate:
@@ -26,17 +33,7 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus,metrics
-  endpoint:
-    health:
-      show-details: always
-
-springdoc:
-  api-docs:
-    path: /api-docs
-  swagger-ui:
-    path: /swagger-ui.html
+server:
+  tomcat:
+    threads:
+      max: 50

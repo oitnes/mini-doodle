@@ -4,9 +4,16 @@ services:
     environment:
       POSTGRES_DB: minidoodle
       POSTGRES_USER: minidoodle
+      # Local-development credentials only; any real deployment must inject
+      # secrets from the environment, not the compose file.
       POSTGRES_PASSWORD: minidoodle
     ports:
-      - "5432:5432"
+      # Bound to loopback: handy for local psql, invisible to the LAN.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Named volume so data survives `docker compose down` + `up`.
+      # Reset with `docker compose down -v`.
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U minidoodle"]
       interval: 5s
@@ -18,9 +25,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+    # Explicit limit so the JVM's MaxRAMPercentage (see Dockerfile) sizes the
+    # heap from a known bound instead of 75% of the whole host.
+    mem_limit: 512m
     ports:
       - "8080:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/minidoodle
       SPRING_DATASOURCE_USERNAME: minidoodle
       SPRING_DATASOURCE_PASSWORD: minidoodle
+
+volumes:
+  pgdata:

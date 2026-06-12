@@ -32,6 +32,7 @@ class SlotIntegrationTest extends BaseIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().startAt()).isEqualTo(start);
+        assertThat(response.getBody().createdAt()).isNotNull();
     }
 
     @Test
@@ -173,6 +174,51 @@ class SlotIntegrationTest extends BaseIntegrationTest {
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(fetched.getBody().id()).isEqualTo(created.id());
         assertThat(fetched.getBody().startAt()).isEqualTo(start);
+    }
+
+    @Test
+    void createSlot_bothEndAtAndDuration_returns400() {
+        UserResponse user = createUser();
+        Instant start = Instant.now().plus(70, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/v1/users/" + user.id() + "/slots",
+                new CreateSlotRequest(start, start.plus(1, ChronoUnit.HOURS), 30),
+                String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void createSlotForUnknownUser_returns404() {
+        Instant start = Instant.now().plus(80, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+
+        ResponseEntity<String> response = rest.postForEntity(
+                "/api/v1/users/" + java.util.UUID.randomUUID() + "/slots",
+                new CreateSlotRequest(start, start.plus(1, ChronoUnit.HOURS), null),
+                String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    void getUnknownSlot_returns404() {
+        UserResponse user = createUser();
+
+        ResponseEntity<String> response = rest.getForEntity(
+                "/api/v1/users/" + user.id() + "/slots/" + java.util.UUID.randomUUID(), String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    void unknownSortProperty_returns400() {
+        UserResponse user = createUser();
+
+        ResponseEntity<String> response = rest.getForEntity(
+                "/api/v1/users/" + user.id() + "/slots?sort=zzz", String.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
     }
 
     private SlotResponse patchStatus(UserResponse user, SlotResponse slot, String status) {

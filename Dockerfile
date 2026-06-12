@@ -16,4 +16,9 @@ RUN ./gradlew bootJar --no-daemon -q
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run as a non-root user: an exploited app should not own the container.
+RUN useradd --system --no-create-home appuser
+USER appuser
+# MaxRAMPercentage sizes the heap from the container memory limit instead of
+# the JVM's conservative 25% default.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]

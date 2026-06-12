@@ -10,13 +10,16 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+// All meeting operations are addressed through the owning user, mirroring the
+// slot endpoints, so ownership scoping applies uniformly across the API.
 @RestController
+@RequestMapping("/api/v1/users/{userId}")
 @RequiredArgsConstructor
 public class MeetingController {
 
     private final MeetingService meetingService;
 
-    @PostMapping("/api/v1/users/{userId}/slots/{slotId}/meeting")
+    @PostMapping("/slots/{slotId}/meeting")
     @ResponseStatus(HttpStatus.CREATED)
     public MeetingResponse bookMeeting(
             @PathVariable UUID userId,
@@ -26,14 +29,20 @@ public class MeetingController {
         return meetingService.bookMeeting(userId, slotId, request);
     }
 
-    @GetMapping("/api/v1/meetings/{meetingId}")
-    public MeetingResponse getMeeting(@PathVariable UUID meetingId) {
-        return meetingService.getMeeting(meetingId);
+    @GetMapping("/meetings/{meetingId}")
+    public MeetingResponse getMeeting(
+            @PathVariable UUID userId,
+            @PathVariable UUID meetingId
+    ) {
+        return meetingService.getMeeting(userId, meetingId);
     }
 
-    @DeleteMapping("/api/v1/meetings/{meetingId}")
+    @DeleteMapping("/meetings/{meetingId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void cancelMeeting(@PathVariable UUID meetingId) {
-        meetingService.cancelMeeting(meetingId);
+    public void cancelMeeting(
+            @PathVariable UUID userId,
+            @PathVariable UUID meetingId
+    ) {
+        meetingService.cancelMeeting(userId, meetingId);
     }
 }

@@ -57,3 +57,9 @@ CREATE TABLE participant (
     response_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     CONSTRAINT chk_participant_identity CHECK (user_id IS NOT NULL OR email IS NOT NULL)
 );
+
+-- Postgres does not auto-index FK columns. meeting_id is hit by every
+-- participants fetch and by the ON DELETE CASCADE on meeting cancel;
+-- user_id supports reverse lookups (a user's meeting invitations).
+CREATE INDEX idx_participant_meeting ON participant (meeting_id);
+CREATE INDEX idx_participant_user ON participant (user_id);

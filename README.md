@@ -13,10 +13,10 @@ docker-compose up
 ```
 
 The app starts on `http://localhost:8080` after the Postgres healthcheck passes.
+The full API contract is documented below.
 
-- Swagger UI: `http://localhost:8080/swagger-ui.html`
-- OpenAPI JSON: `http://localhost:8080/api-docs`
-- Prometheus metrics: `http://localhost:8080/actuator/prometheus`
+Database data lives in a named Docker volume and survives `docker-compose down`;
+reset everything with `docker-compose down -v`.
 
 ---
 
@@ -31,7 +31,7 @@ POST /api/v1/users
 {
   "email": "alice@example.com",
   "displayName": "Alice",
-  "timezone": "Europe/Warsaw"   // optional, defaults to UTC
+  "timezone": "Europe/Warsaw"   // optional IANA zone id, defaults to UTC
 }
 → 201 UserResponse
 ```
@@ -42,10 +42,16 @@ POST /api/v1/users
 POST   /api/v1/users/{userId}/slots
 {
   "startAt": "2026-06-15T09:00:00Z",
-  "endAt":   "2026-06-15T10:00:00Z"   // either endAt or durationMinutes required
+  "endAt":   "2026-06-15T10:00:00Z"   // exactly one of endAt / durationMinutes
 }
 
 GET    /api/v1/users/{userId}/slots?page=0&size=50
+→ 200
+{
+  "content": [ SlotResponse, ... ],
+  "page": { "size": 50, "number": 0, "totalElements": 3, "totalPages": 1 }
+}
+
 GET    /api/v1/users/{userId}/slots/{slotId}
 
 PATCH  /api/v1/users/{userId}/slots/{slotId}
@@ -98,9 +104,31 @@ POST /api/v1/users/{userId}/slots/{slotId}/meeting
 }
 → 201 MeetingResponse
 
-GET    /api/v1/meetings/{meetingId}
-DELETE /api/v1/meetings/{meetingId}    // idempotent, frees the slot
+GET    /api/v1/users/{userId}/meetings/{meetingId}
+DELETE /api/v1/users/{userId}/meetings/{meetingId}    // idempotent, frees the slot
 ```
+
+Meetings, like slots, are addressed through the owning user — only the slot
+owner's path can read or cancel a meeting.
+
+### Errors
+
+All 4xx responses share one body shape:
+
+```json
+{
+  "status": 409,
+  "error": "Conflict",
+  "message": "Slot is already booked: 6f1d…",
+  "timestamp": "2026-06-15T09:00:00Z"
+}
+```
+
+| Code | When |
+|------|------|
+| 400 | Validation failure, malformed body/params, invalid time range or timezone, unknown sort property, window > 1 year |
+| 404 | Unknown user/slot/meeting, or reading another user's slot/meeting (foreign DELETE of a meeting is an idempotent 204 no-op) |
+| 409 | Overlapping slot, booking a BUSY slot, modifying/deleting a booked slot, concurrent booking lost, duplicate email |
 
 ---
 
@@ -153,15 +181,17 @@ simpler and fast enough.
 1. Load slot (version = N)
 2. Assert status == FREE        → 409 if already BUSY
 3. Set status = BUSY
-4. Save slot                    → version check fires here
-5. Insert Meeting row
+4. Insert Meeting row
+5. Commit                       → flush runs UPDATE ... WHERE version = N
 ```
 
 Two concurrent requests racing for the same FREE slot both pass step 2. One
-commits first and bumps the version to N+1. The second commit detects the stale
-version and throws `OptimisticLockingFailureException`, which is translated to 409.
+commits first; the loser then fails on whichever defence its flush hits first —
+in practice the `meeting.slot_id` UNIQUE constraint (Hibernate flushes the
+meeting INSERT before the version-checked slot UPDATE), with the stale
+`@Version` check as the second line. Either way the loser gets a 409.
 
-This gives two independent defences:
+The two independent defences:
 
 | Layer | Mechanism | Handles |
 |-------|-----------|---------|
@@ -239,7 +269,16 @@ on hot slots turns out to be high.
 sync without coupling the booking transaction to delivery.
 
 **AuthN/AuthZ** — the prototype trusts `userId` in the path. Production needs JWT and
-ownership checks so users can only mutate their own calendar.
+ownership checks so users can only mutate their own calendar. Ownership scoping is
+already uniform across all endpoints, so this means validating one identity.
+
+**Rate limiting** — registration and slot creation are unauthenticated and unmetered.
+Per-request work is bounded (page size, availability window, participant count), but
+nothing limits request volume.
+
+**Enumeration trade-offs** — duplicate-email registration returns 409, and participant
+responses expose `userId` for registered emails; both deliberately favour API clarity
+over hiding which emails have accounts.
 
 **Participant double-booking** — flag (or block) when a participant is already in a
 conflicting meeting. Currently modelled but not enforced at the application layer.
